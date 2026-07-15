@@ -1,35 +1,33 @@
-# Predictive Intelligence System for Analyzing and Visualizing Student Academic Performance
+# Predictive Intelligence System for Student Performance
 
-This project is a predictive intelligence system for analyzing and visualizing student academic performance using academic and engagement features. It includes a working FastAPI backend, a hybrid machine learning model, and a React + Vite frontend dashboard inspired by the provided poster-style UI sample.
+This project predicts and visualizes student academic performance using academic scores, attendance, and engagement data. It includes a FastAPI backend, a hybrid machine learning model, and a React + Vite dashboard.
 
-## Overview
+## What It Does
 
-The system uses a combined approach rather than a single algorithm:
+The model combines several approaches:
 
-- `Decision Tree` for a simple and explainable baseline
-- `Random Forest` for stronger prediction accuracy and reduced overfitting
-- `MLP Neural Network` for learning non-linear patterns
-- `Voting Ensemble` to combine model predictions into a final result
+- `Decision Tree` for a simple baseline
+- `Random Forest` for stronger prediction accuracy
+- `MLP Neural Network` for non-linear patterns
+- `Voting Ensemble` to combine the model outputs
 
-The dashboard shows:
+The dashboard includes:
 
-- dataset summary statistics
+- student record entry
+- saved record browsing
+- model predictions and confidence
+- summary statistics
 - category distribution
-- prediction form
-- predicted performance category and confidence
-- model evaluation metrics
 - confusion matrix
 
-The project is designed as a final-year Computer Science project with a Python backend, analytics layer, and a web dashboard for visualization.
+## Input Fields
 
-## Features
-
-The model can use inputs such as:
+The model uses:
 
 - Attendance percentage
-- Assignment scores
-- Quiz scores
-- Test scores
+- Assignment score
+- Quiz score
+- Test score
 - Continuous assessment score
 - Previous GPA
 - Missed classes
@@ -68,57 +66,29 @@ project/
 
 ## Quick Start
 
-### Windows command scripts
-Use these helper scripts from the project root.
+### Easy Run Steps
 
-- `setup.cmd` — prepare Python and frontend dependencies
-- `train-model.cmd` — train the model and save the artifact
-- `run-backend.cmd` — start the FastAPI backend on port `8002`
-- `run-frontend.cmd` — start the React/Vite frontend on port `5174`
-- `start.cmd` — run setup and launch backend/frontend windows
-
-> `setup.cmd` has been verified to create the `.venv` and install `frontend/node_modules` if needed.
-
-### Run the project step by step
-1. Open CMD in `c:\Users\saleh\OneDrive\Desktop\project`
-2. Run:
-
-```bat
-setup.cmd
-```
-
-3. Train the model:
-
-```bat
-train-model.cmd
-```
-
-4. Start the backend:
-
-```bat
-run-backend.cmd
-```
-
-5. In a second command prompt, start the frontend:
-
-```bat
-run-frontend.cmd
-```
-
-6. Open the dashboard:
+1. Open the project folder on your computer.
+2. Double-click `setup.cmd` to install the required files.
+3. Double-click `train-model.cmd` to prepare the prediction model.
+4. Double-click `run-backend.cmd` to start the backend.
+5. Double-click `run-frontend.cmd` in another Command Prompt to open the site.
+6. Open this link in your browser:
 
 ```text
 http://127.0.0.1:5174
 ```
 
-### One-command startup
-To start both backend and frontend together, run:
+### One-Click Start
+
+If you want everything to start at once, run:
 
 ```bat
 start.cmd
 ```
 
-### Manual start if needed
+### Manual Start
+
 ```bat
 .venv\Scripts\activate
 python -m app.train
@@ -128,13 +98,14 @@ npm run dev -- --host 127.0.0.1 --port 5174
 ```
 
 ### API Endpoints
-- `GET /health` — checks that the service is running
-- `GET /summary` — returns dashboard statistics and metrics
-- `POST /predict` — returns a performance category prediction
 
-## Evaluation Approach
+- `GET /health` - check that the service is running
+- `GET /summary` - return dashboard statistics and metrics
+- `POST /predict` - return a performance prediction
 
-The model is trained on an augmented version of the sample dataset and evaluated using a holdout test split. The dashboard reports:
+## Evaluation
+
+The model is trained on an augmented version of the sample dataset and evaluated with a holdout test split. The dashboard reports:
 
 - Accuracy
 - Precision
@@ -144,10 +115,10 @@ The model is trained on an augmented version of the sample dataset and evaluated
 
 ## Design Reference
 
-The dashboard uses the supplied image as a visual reference for spacing, bold hero presentation, pill-style navigation, and colorful layered cards. It is adapted for an academic analytics product instead of a marketing landing page.
+The layout follows the supplied screenshot for spacing, strong hero cards, pill-style navigation, and layered panels. It is adapted for an academic analytics project rather than a marketing page.
 
 ## Notes
 
-- The project uses a hybrid ensemble design suitable for academic evaluation.
-- A sample dataset is included to make it easier to continue development later.
-- You can replace the sample data with your real student dataset when ready.
+- The project uses a hybrid ensemble approach suitable for academic evaluation.
+- A sample dataset is included to make further development easier.
+- You can replace the sample data with your own student records later.
