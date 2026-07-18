@@ -1,6 +1,30 @@
 from pydantic import AliasChoices, BaseModel, Field
 
 
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    email: str = Field(min_length=5, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(min_length=6, max_length=128)
+    full_name: str = Field(min_length=1, max_length=100)
+
+
+class UserLogin(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=6, max_length=128)
+
+
+class UserProfile(BaseModel):
+    username: str
+    email: str
+    full_name: str
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserProfile
+
+
 class StudentInput(BaseModel):
     student_id: str = Field(min_length=1, max_length=50)
     student_name: str = Field(min_length=1, max_length=100)

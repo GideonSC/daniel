@@ -4,20 +4,34 @@ from statistics import mean
 from collections import Counter
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import create_access_token, decode_access_token, hash_password, verify_password
 from app.config import METRICS_FILE, MODEL_FILE, RECORDS_DB, TRAINING_DATA
 from app.model import load_model, predict_single
 from app.schemas import (
+    AuthResponse,
     BulkUploadResponse,
     PredictionResponse,
     StudentForecastRequest,
     StudentForecastResponse,
     StudentInput,
     StudentRecord,
+    UserCreate,
+    UserLogin,
+    UserProfile,
 )
-from app.storage import clear_student_records, fetch_student_records, fetch_student_records_by_name, init_records_db, insert_student_record
+from app.storage import (
+    clear_student_records,
+    fetch_student_records,
+    fetch_student_records_by_name,
+    fetch_user_by_username,
+    init_records_db,
+    insert_student_record,
+    insert_user,
+)
 from app.utils import augment_dataset, build_student_id, category_distribution, load_dataset, numeric_summary
 
 
@@ -41,6 +55,19 @@ model = None
 metrics = {}
 base_dataset = load_dataset(TRAINING_DATA)
 dataset = augment_dataset(base_dataset, copies=18)
+bearer_scheme = HTTPBearer()
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> UserProfile:
+    username = decode_access_token(credentials.credentials)
+    user = fetch_user_by_username(RECORDS_DB, username)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Login session user was not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return UserProfile(username=user["username"], email=user["email"], full_name=user["full_name"])
 
 
 @app.on_event("startup")
@@ -68,8 +95,49 @@ def root():
     }
 
 
+@app.post("/auth/register", response_model=AuthResponse)
+def register(user: UserCreate):
+    username = user.username.strip().lower()
+    if fetch_user_by_username(RECORDS_DB, username):
+        raise HTTPException(status_code=409, detail="Username is already registered")
+
+    saved_user = insert_user(
+        RECORDS_DB,
+        {
+            "username": username,
+            "email": user.email.strip().lower(),
+            "password_hash": hash_password(user.password),
+            "full_name": user.full_name.strip(),
+        },
+    )
+    token = create_access_token(saved_user["username"])
+    return AuthResponse(
+        access_token=token,
+        user=UserProfile(username=saved_user["username"], email=saved_user["email"], full_name=saved_user["full_name"]),
+    )
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+def login(credentials: UserLogin):
+    username = credentials.username.strip().lower()
+    user = fetch_user_by_username(RECORDS_DB, username)
+    if not user or not verify_password(credentials.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    token = create_access_token(user["username"])
+    return AuthResponse(
+        access_token=token,
+        user=UserProfile(username=user["username"], email=user["email"], full_name=user["full_name"]),
+    )
+
+
+@app.get("/auth/me", response_model=UserProfile)
+def auth_me(current_user: UserProfile = Depends(get_current_user)):
+    return current_user
+
+
 @app.get("/summary")
-def summary():
+def summary(current_user: UserProfile = Depends(get_current_user)):
     stored_records = fetch_student_records(RECORDS_DB)
     stored_categories = category_distribution(stored_records)
     stored_at_risk_total = sum(item["value"] for item in stored_categories if item["label"] in {"Low", "Average"})
@@ -88,7 +156,7 @@ def summary():
 
 
 @app.post("/predict", response_model=PredictionResponse)
-def predict(student: StudentInput):
+def predict(student: StudentInput, current_user: UserProfile = Depends(get_current_user)):
     if model is None:
         raise HTTPException(status_code=503, detail="Model is not loaded yet")
     return _predict_and_store(student.model_dump())
@@ -120,12 +188,12 @@ def _predict_and_store(payload: dict) -> PredictionResponse:
 
 
 @app.get("/records", response_model=list[StudentRecord])
-def records():
+def records(current_user: UserProfile = Depends(get_current_user)):
     return fetch_student_records(RECORDS_DB)
 
 
 @app.delete("/records")
-def delete_records():
+def delete_records(current_user: UserProfile = Depends(get_current_user)):
     deleted_count = clear_student_records(RECORDS_DB)
     return {
         "message": "All student records deleted",
@@ -200,7 +268,7 @@ def _forecast_from_history(student_name: str, history: list[dict]) -> StudentFor
 
 
 @app.post("/forecast-student", response_model=StudentForecastResponse)
-def forecast_student(request: StudentForecastRequest):
+def forecast_student(request: StudentForecastRequest, current_user: UserProfile = Depends(get_current_user)):
     if model is None:
         raise HTTPException(status_code=503, detail="Model is not loaded yet")
 
@@ -249,7 +317,7 @@ def _normalize_bulk_row(row: dict) -> dict:
 
 
 @app.post("/upload-excel", response_model=BulkUploadResponse)
-async def upload_excel(file: UploadFile = File(...)):
+async def upload_excel(file: UploadFile = File(...), current_user: UserProfile = Depends(get_current_user)):
     if model is None:
         raise HTTPException(status_code=503, detail="Model is not loaded yet")
 

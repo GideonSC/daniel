@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = "http://127.0.0.1:8002";
+const API_BASE = "http://127.0.0.1:8003";
+const AUTH_STORAGE_KEY = "student-performance-auth";
+
+const defaultAuthForm = {
+  username: "daniel",
+  email: "",
+  password: "",
+  full_name: "Daniel User",
+};
 
 const defaultForm = {
   previous_gpa: 3.4,
@@ -315,6 +323,18 @@ function DonutChart({ items, total }) {
 }
 
 export default function App() {
+  const [authSession, setAuthSession] = useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY)) ?? null;
+    } catch {
+      return null;
+    }
+  });
+  const [authForm, setAuthForm] = useState(defaultAuthForm);
+  const [authMode, setAuthMode] = useState("login");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [summary, setSummary] = useState(null);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(defaultForm);
@@ -331,10 +351,35 @@ export default function App() {
   const [error, setError] = useState("");
   const [activeNav, setActiveNav] = useState("Dashboard");
 
+  const authHeaders = authSession?.access_token
+    ? { Authorization: `Bearer ${authSession.access_token}` }
+    : {};
+
+  const apiFetch = (path, options = {}) => {
+    const headers = {
+      ...authHeaders,
+      ...(options.headers ?? {}),
+    };
+    return fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    });
+  };
+
+  const handleUnauthorized = () => {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    setAuthSession(null);
+    setAuthError("Please sign in again to continue.");
+  };
+
   const loadSummary = () => {
-    return fetch(`${API_BASE}/summary`)
+    return apiFetch("/summary")
       .then(async (response) => {
         const data = await readResponseData(response);
+        if (response.status === 401) {
+          handleUnauthorized();
+          return null;
+        }
         if (!response.ok) {
           throw new Error(data?.detail || `Summary request failed (${response.status})`);
         }
@@ -349,9 +394,13 @@ export default function App() {
   };
 
   const loadRecords = () => {
-    return fetch(`${API_BASE}/records`)
+    return apiFetch("/records")
       .then(async (response) => {
         const data = await readResponseData(response);
+        if (response.status === 401) {
+          handleUnauthorized();
+          return [];
+        }
         if (!response.ok) {
           throw new Error(data?.detail || `Records request failed (${response.status})`);
         }
@@ -373,9 +422,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadSummary();
-    loadRecords();
-  }, []);
+    if (authSession?.access_token) {
+      loadSummary();
+      loadRecords();
+    }
+  }, [authSession?.access_token]);
 
   useEffect(() => {
     if (mobileSidebarOpen) {
@@ -558,10 +609,58 @@ export default function App() {
     { label: "Engagement Level", value: clamp(heroRecord.lms_engagement ?? 0, 0, 100) },
   ];
 
+  const onAuthChange = (key, value) => {
+    setAuthForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const onAuthSubmit = async (event) => {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthError("");
+
+    try {
+      const payload = {
+        username: authForm.username.trim(),
+        password: authForm.password,
+      };
+      if (authMode === "register") {
+        payload.full_name = authForm.full_name.trim();
+        payload.email = authForm.email.trim();
+      }
+
+      const response = await fetch(`${API_BASE}/auth/${authMode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await readResponseData(response);
+      if (!response.ok) throw new Error(data?.detail || "Authentication failed");
+
+      window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(data));
+      setAuthSession(data);
+      setAuthForm((current) => ({ ...current, password: "" }));
+    } catch (loginError) {
+      setAuthError(loginError.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const logout = () => {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    setAuthSession(null);
+    setSummary(null);
+    setRecords([]);
+    setFeaturedRecord(null);
+    setSelectedRecord(null);
+    setError("");
+    setUploadMessage("");
+  };
+
   const scrollToSection = (target, label) => {
     setActiveNav(label);
     setMobileSidebarOpen(false);
-    document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const openRecordModal = (record) => setSelectedRecord(record);
@@ -579,12 +678,16 @@ export default function App() {
 
     try {
       const payload = normalizePayload(form);
-      const response = await fetch(`${API_BASE}/predict`, {
+      const response = await apiFetch("/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const data = await readResponseData(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) throw new Error(data?.detail || "Prediction failed");
 
       setResult(data);
@@ -632,11 +735,15 @@ export default function App() {
       const formData = new FormData();
       formData.append("file", uploadFile);
 
-      const response = await fetch(`${API_BASE}/upload-excel`, {
+      const response = await apiFetch("/upload-excel", {
         method: "POST",
         body: formData,
       });
       const data = await readResponseData(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) throw new Error(data?.detail || "Excel upload failed");
 
       setUploadMessage(`Uploaded ${data.uploaded_count} rows. ${data.failed_count} failed.`);
@@ -662,8 +769,12 @@ export default function App() {
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`${API_BASE}/records`, { method: "DELETE" });
+      const response = await apiFetch("/records", { method: "DELETE" });
       const data = await readResponseData(response);
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) {
         throw new Error(data?.detail || data?.message || "Reset failed");
       }
@@ -683,6 +794,122 @@ export default function App() {
       setError(resetError.message);
     }
   };
+
+  const showSummary = activeNav === "Dashboard";
+  const showHero = ["Dashboard", "Students", "Prediction"].includes(activeNav);
+  const showIndicators = ["Dashboard", "Students", "Prediction"].includes(activeNav);
+  const showAnalytics = ["Dashboard", "Analytics", "Reports"].includes(activeNav);
+  const showPredictionForm = ["Students", "Prediction"].includes(activeNav);
+  const showRecords = ["Dashboard", "Data Records", "Reports"].includes(activeNav);
+  const showUpload = activeNav === "Upload";
+  const showAlerts = ["Dashboard", "Alerts"].includes(activeNav);
+  const showFactors = ["Dashboard", "Analytics"].includes(activeNav);
+  const hasMainContent = showHero || showIndicators || showAnalytics || showPredictionForm || showRecords;
+  const hasSideContent = showUpload || showAlerts || showFactors;
+
+  if (!authSession?.access_token) {
+    return (
+      <main className="auth-page">
+        <section className="auth-panel">
+          <div className="auth-copy">
+            <p className="eyebrow">Secure access</p>
+            <h1>Student Performance Intelligence</h1>
+            <p>Sign in to manage predictions, uploads, records, and at-risk student insights.</p>
+          </div>
+
+          <form className="auth-card" onSubmit={onAuthSubmit}>
+            <div className="auth-tabs" aria-label="Authentication mode">
+              <button
+                type="button"
+                className={authMode === "login" ? "active" : ""}
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError("");
+                }}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                className={authMode === "register" ? "active" : ""}
+                onClick={() => {
+                  setAuthMode("register");
+                  setAuthError("");
+                }}
+              >
+                Create account
+              </button>
+            </div>
+
+            <label className="form-field">
+              <span>Username</span>
+              <input
+                type="text"
+                value={authForm.username}
+                minLength="3"
+                autoComplete="username"
+                onChange={(event) => onAuthChange("username", event.target.value)}
+              />
+            </label>
+
+            {authMode === "register" ? (
+              <>
+                <label className="form-field">
+                  <span>Full name</span>
+                  <input
+                    type="text"
+                    value={authForm.full_name}
+                    minLength="1"
+                    autoComplete="name"
+                    onChange={(event) => onAuthChange("full_name", event.target.value)}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    value={authForm.email}
+                    minLength="5"
+                    autoComplete="email"
+                    onChange={(event) => onAuthChange("email", event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+
+            <label className="form-field">
+              <span>Password</span>
+              <div className="password-field">
+                <input
+                  type={passwordVisible ? "text" : "password"}
+                  value={authForm.password}
+                  minLength="6"
+                  autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                  onChange={(event) => onAuthChange("password", event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setPasswordVisible((current) => !current)}
+                  aria-label={passwordVisible ? "Hide password" : "Show password"}
+                  title={passwordVisible ? "Hide password" : "Show password"}
+                >
+                  {passwordVisible ? "◉" : "◎"}
+                </button>
+              </div>
+            </label>
+
+            {authError ? <div className="message error">{authError}</div> : null}
+
+            <button type="submit" className="cta-button" disabled={authLoading}>
+              {authLoading ? "Please wait..." : authMode === "login" ? "Sign in" : "Create account"}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -713,11 +940,14 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="avatar-chip">DU</div>
+          <div className="avatar-chip">{studentInitials(authSession.user?.full_name)}</div>
           <div>
-            <strong>Daniel</strong>
-            <p>User</p>
+            <strong>{authSession.user?.full_name ?? authSession.user?.username}</strong>
+            <p>{authSession.user?.username}</p>
           </div>
+          <button type="button" className="logout-button" onClick={logout}>
+            Logout
+          </button>
         </div>
       </aside>
 
@@ -736,8 +966,8 @@ export default function App() {
               ☰
             </button>
             <div>
-              <p className="eyebrow">Prediction Overview</p>
-              <h1>Prediction Overview</h1>
+              <p className="eyebrow">Workspace</p>
+              <h1>{activeNav}</h1>
             </div>
           </div>
 
@@ -759,21 +989,25 @@ export default function App() {
           </div>
         </header>
 
-        <section className="summary-grid" id="overview-section">
-          {summaryCards.map((card) => (
-            <article className="summary-card" key={card.label}>
-              <div className={card.iconClass}>{card.icon}</div>
-              <div>
-                <strong>{card.value}</strong>
-                <span>{card.label}</span>
-                <p>{card.note}</p>
-              </div>
-            </article>
-          ))}
-        </section>
+        {showSummary ? (
+          <section className="summary-grid" id="overview-section">
+            {summaryCards.map((card) => (
+              <article className="summary-card" key={card.label}>
+                <div className={card.iconClass}>{card.icon}</div>
+                <div>
+                  <strong>{card.value}</strong>
+                  <span>{card.label}</span>
+                  <p>{card.note}</p>
+                </div>
+              </article>
+            ))}
+          </section>
+        ) : null}
 
-        <div className="dashboard-grid">
+        <div className={`dashboard-grid ${!hasMainContent || !hasSideContent ? "single-page" : ""}`}>
+          {hasMainContent ? (
           <section className="content-column">
+            {showHero ? (
             <article className="card hero-card" id="prediction-section">
               <div className="card-header hero-header">
                 <div>
@@ -785,7 +1019,7 @@ export default function App() {
                     <span>Level: {heroRecord.level || "N/A"}</span>
                   </div>
                 </div>
-                <button type="button" className="primary-button" onClick={() => scrollToSection("prediction-form", "Students")}>
+                <button type="button" className="primary-button" onClick={() => scrollToSection("prediction-form", "Prediction")}>
                   Predict Again
                 </button>
               </div>
@@ -813,7 +1047,9 @@ export default function App() {
                 </div>
               </div>
             </article>
+            ) : null}
 
+            {showIndicators ? (
             <section className="indicator-grid">
               {indicatorDefs.map((item) => (
                 <article className="indicator-card" key={item.label}>
@@ -828,7 +1064,9 @@ export default function App() {
                 </article>
               ))}
             </section>
+            ) : null}
 
+            {showAnalytics ? (
             <section className="analytics-grid" id="analytics-section">
               <article className="card chart-card">
                 <div className="card-header">
@@ -859,7 +1097,9 @@ export default function App() {
                 <DonutChart items={donutItems} total={totalStoredStudents} />
               </article>
             </section>
+            ) : null}
 
+            {showPredictionForm ? (
             <article className="card form-card" id="prediction-form">
               <div className="card-header">
                 <div>
@@ -951,7 +1191,9 @@ export default function App() {
                 </button>
               </form>
             </article>
+            ) : null}
 
+            {showRecords ? (
             <article className="card records-card" id="records-section">
               <div className="card-header">
                 <div>
@@ -1003,9 +1245,13 @@ export default function App() {
                 )}
               </div>
             </article>
+            ) : null}
           </section>
+          ) : null}
 
+          {hasSideContent ? (
           <aside className="side-column">
+            {showUpload ? (
             <article className="card side-card" id="upload-section">
               <div className="card-header">
                 <div>
@@ -1037,7 +1283,9 @@ export default function App() {
                 {uploadMessage ? <p className="upload-message">{uploadMessage}</p> : null}
               </form>
             </article>
+            ) : null}
 
+            {showAlerts ? (
             <article className="card side-card" id="risk-section">
               <div className="card-header">
                 <div>
@@ -1072,7 +1320,9 @@ export default function App() {
                 )}
               </div>
             </article>
+            ) : null}
 
+            {showFactors ? (
             <article className="card side-card">
               <div className="card-header">
                 <div>
@@ -1099,7 +1349,9 @@ export default function App() {
                 These factors are the most influential signals in the model&apos;s current analysis.
               </div>
             </article>
+            ) : null}
           </aside>
+          ) : null}
         </div>
       </main>
 

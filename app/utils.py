@@ -27,6 +27,15 @@ def decode_target(value: int) -> str:
 
 
 def category_distribution(df: pd.DataFrame):
+    if isinstance(df, list):
+        counts = {}
+        for row in df:
+            label = row.get("performance_category") or row.get("predicted_category")
+            if label:
+                counts[str(label)] = counts.get(str(label), 0) + 1
+        ordered = ["Low", "Average", "High"]
+        return [{"label": item, "value": int(counts.get(item, 0))} for item in ordered]
+
     counts = df["performance_category"].value_counts().to_dict()
     ordered = ["Low", "Average", "High"]
     return [{"label": item, "value": int(counts.get(item, 0))} for item in ordered]

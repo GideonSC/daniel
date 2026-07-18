@@ -35,7 +35,78 @@ def init_records_db(path: Path) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL DEFAULT '',
+                password_hash TEXT NOT NULL,
+                full_name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        try:
+            connection.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         connection.commit()
+
+
+def insert_user(path: Path, user: dict) -> dict:
+    created_at = datetime.now(timezone.utc).isoformat()
+    with _connect(path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO users (
+                username,
+                email,
+                password_hash,
+                full_name,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                user["username"],
+                user["email"],
+                user["password_hash"],
+                user["full_name"],
+                created_at,
+            ),
+        )
+        connection.commit()
+        return {
+            "id": cursor.lastrowid,
+            "username": user["username"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "created_at": created_at,
+        }
+
+
+def fetch_user_by_username(path: Path, username: str) -> dict | None:
+    normalized_username = str(username).strip().lower()
+    if not normalized_username:
+        return None
+
+    with _connect(path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                username,
+                email,
+                password_hash,
+                full_name,
+                created_at
+            FROM users
+            WHERE username = ?
+            """,
+            (normalized_username,),
+        ).fetchone()
+
+    return dict(row) if row else None
 
 
 def insert_student_record(path: Path, record: dict) -> dict:

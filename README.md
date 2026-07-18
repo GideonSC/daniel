@@ -92,7 +92,7 @@ start.cmd
 ```bat
 .venv\Scripts\activate
 python -m app.train
-python -m uvicorn app.api:app --reload --port 8002
+python -m uvicorn app.api:app --reload --port 8003
 cd frontend
 npm run dev -- --host 127.0.0.1 --port 5174
 ```
